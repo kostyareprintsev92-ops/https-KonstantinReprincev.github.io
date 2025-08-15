@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Приложение тренера</title>
+  <style>
+    :root { --bg:#f6f6f6; --card:#fff; --muted:#7d7d7d; --text:#111; }
+    *{box-sizing:border-box} 
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{max-width:900px;margin:20px auto;padding:0 16px}
+    .bar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.95);backdrop-filter:saturate(150%) blur(6px);border-bottom:1px solid #eaeaea}
+    .bar-in{max-width:900px;margin:0 auto;display:flex;align-items:center;padding:8px 16px}
+    .bar-in img{height:40px;width:auto;border-radius:50%;margin-right:12px}
+    .bar-in span{font-size:16px;font-weight:700;white-space:nowrap}
+    .card{background:var(--card);border:1px solid #eaeaea;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.03)}
+    .ttl{font-weight:700;margin-bottom:8px}
+    .in{padding:10px 12px;border:1px solid #d7d7d7;border-radius:10px;width:100%;font-size:16px;background:#fff}
+    .row{display:grid;gap:12px}
+    @media(min-width:700px){ .row{grid-template-columns:1fr 1fr} }
+    .btn{padding:12px 16px;border-radius:10px;border:0;font-weight:700;font-size:16px}
+    .btn.primary{background:#111;color:#fff}
+    .btn:disabled{opacity:.6}
+    .btn.call{background:#d11;color:#fff;display:block;text-align:center;text-decoration:none}
+    .muted{color:var(--muted);font-size:14px}
+    #msg{display:none;padding:10px;border-radius:8px;margin-top:12px}
+    #msg.ok{display:block;background:#e9f7ef;color:#0a7a3f;border:1px solid #bde5c8}
+    #msg.err{display:block;background:#fdecea;color:#9f3a38;border:1px solid #f5c6cb}
+    footer{margin:32px 0;color:#888;text-align:center;font-size:14px}
+  </style>
+</head>
+<body>
+  <!-- Шапка с логотипом и девизом -->
+  <div class="bar">
+    <div class="bar-in">
+      <img src="Logo.png" alt="Логотип">
+      <span>Ваша цель = моя работа!</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="ttl">Записаться на тренировку</div>
+      <p class="muted">Оставьте данные — я подтвержу запись и свяжусь с вами.</p>
+
+      <form id="bookingForm">
+        <div class="row">
+          <input id="name" class="in" placeholder="Имя" autocomplete="name" required />
+          <input id="phone" class="in" placeholder="Телефон" inputmode="tel" autocomplete="tel" required />
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <input id="date" class="in" type="date" required />
+          <select id="time" class="in" required>
+            <option value="" disabled selected>Время</option>
+            <option>08:00</option><option>09:00</option><option>10:00</option>
+            <option>11:00</option><option>12:00</option><option>13:00</option>
+            <option>14:00</option><option>15:00</option><option>16:00</option>
+            <option>17:00</option><option>18:00</option><option>19:00</option>
+            <option>20:00</option>
+          </select>
+        </div>
+
+        <textarea id="note" class="in" placeholder="Комментарий (необязательно)" style="margin-top:12px;height:90px"></textarea>
+
+        <button id="submitBtn" class="btn primary" type="submit" style="margin-top:14px">Записаться</button>
+        <!-- Кнопка "Позвонить" -->
+        <a href="tel:+79270137211" class="btn call" style="margin-top:10px;">📞 Позвонить</a>
+
+        <div id="msg"></div>
+      </form>
+
+      <p class="muted" style="margin-top:14px">Заявки сохраняются в Cloud Firestore и отправляются в Telegram.</p>
+    </div>
+
+    <footer>Сделано для быстрой записи клиентов</footer>
+  </div>
+
+  <!-- Firebase + Firestore + Telegram -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyA3XwM-qceM1_uMuK7NpTa7RKQyAyQw1Ws",
+      authDomain: "reprincev-b73c7.firebaseapp.com",
+      projectId: "reprincev-b73c7",
+      storageBucket: "reprincev-b73c7.firebasestorage.app",
+      messagingSenderId: "616952094737",
+      appId: "1:616952094737:web:82f22ef07d9f13309911b0",
+      measurementId: "G-8WFHS344GZ"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
+
+    const TG_BOT_TOKEN = "8289814455:AAEtbowPOjZ3PTip5WmBgU64y3yhm2QTmZ0";
+    const TG_CHAT_ID   = "5194745946";
+
+    const clean = s => (s || "").toString().trim();
+    const $ = id => document.getElementById(id);
+
+    const today = new Date();
+    $("date").value = today.toISOString().slice(0,10);
+
+    async function sendToTelegram(text) {
+      const url = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`;
+      await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          chat_id: TG_CHAT_ID,
+          text,
+          parse_mode: "HTML",
+          disable_web_page_preview: true
+        })
+      });
+    }
+
+    function showMsg(ok, text){
+      const box = $("msg");
+      box.className = ok ? "ok" : "err";
+      box.textContent = text;
+    }
+
+    $("bookingForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("submitBtn");
+      btn.disabled = true; showMsg(true, "Отправляем заявку…");
+
+      try {
+        const name = clean($("name").value);
+        const phone = clean($("phone").value);
+        const date = $("date").value;
+        const time = $("time").value;
+        const note = clean($("note").value);
+
+        if (!name || !phone || !date || !time) {
+          showMsg(false, "Заполните имя, телефон, дату и время.");
+          btn.disabled = false; return;
+        }
+
+        await addDoc(collection(db, "Trainings"), {
+          name, phone, date, time, note,
+          createdAt: serverTimestamp(),
+          status: "new"
+        });
+
+        const tgText =
+          `🆕 <b>Новая запись</b>
+` +
+          `👤 Имя: ${name}
+` +
+          `📞 Телефон: ${phone}
+` +
+          `📅 Дата/время: ${date} ${time}
+` +
+          (note ? `📝 Комментарий: ${note}
+` : ``) +
+          `⏱ Отправлено: ${new Date().toLocaleString("ru-RU")}`;
+
+        await sendToTelegram(tgText);
+
+        showMsg(true, "Готово! Я свяжусь с вами для подтверждения.");
+        $("bookingForm").reset();
+        $("date").value = today.toISOString().slice(0,10);
+      } catch (err) {
+        console.error(err);
+        showMsg(false, "Не удалось отправить. Попробуйте ещё раз.");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
